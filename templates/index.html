@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MediaMTX Multi-Stream Viewer</title>
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: minmax(300px, 1fr);
+    gap: 10px;
+    background: #222;
+    color: #fff;
+  }
+  .frame {
+    position: relative;
+    background: #111;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .frame video, .frame iframe, .frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .message {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- WebRTC Frame -->
+<div class="frame">
+  <iframe id="webrtcFrame" frameborder="0"></iframe>
+  <div class="message">WebRTC</div>
+</div>
+
+<!-- HLS Frame -->
+<div class="frame">
+  <video id="hlsVideo" controls autoplay muted></video>
+  <div class="message">HLS</div>
+</div>
+
+<!-- MJPEG Frame -->
+<div class="frame">
+  <img id="mjpegImg" alt="MJPEG stream" />
+  <div class="message">MJPEG</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
+<script>
+  // Dynamically detect host/IP based on how the page is accessed
+  const HOST = window.location.hostname || 'localhost';
+  const WEBRTC_URL = `http://${HOST}:8889/stream`;
+  const HLS_URL = `http://${HOST}:8888/stream.m3u8`;
+  const MJPEG_URL = `http://${HOST}:8888/stream.mjpg`;
+
+  // Assign stream URLs
+  document.getElementById('webrtcFrame').src = WEBRTC_URL;
+  document.getElementById('mjpegImg').src = MJPEG_URL;
+
+  // HLS handling
+  const video = document.getElementById('hlsVideo');
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(HLS_URL);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      console.error('HLS error', data);
+      video.outerHTML = '<div class="message">HLS not available</div>';
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = HLS_URL;
+    video.addEventListener('error', () => {
+      video.outerHTML = '<div class="message">HLS not available</div>';
+    });
+  } else {
+    video.outerHTML = '<div class="message">HLS not supported</div>';
+  }
+
+  // MJPEG error handling
+  const mjpeg = document.getElementById('mjpegImg');
+  mjpeg.onerror = () => {
+    mjpeg.outerHTML = '<div class="message">MJPEG not available</div>';
+  };
+</script>
+
+</body>
+</html>

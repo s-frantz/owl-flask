@@ -1,0 +1,87 @@
+/* Reset default spacing and ensure full-screen */
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: black; /* prevent white flash around edges */
+}
+
+/* Fullscreen video container */
+#video-container {
+    position: fixed; /* fixed ensures it always fills viewport */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: black;
+    overflow: hidden;
+    z-index: 0;
+}
+
+/* Video fills entire screen, aspect ratio preserved */
+#pi-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* or cover if you want to crop edges */
+    background-color: black;
+    display: none; /* initially hidden until streaming starts */
+}
+
+/* Placeholder overlay (centered) */
+.placeholder {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    color: white;
+    font-size: 1.2rem;
+    text-align: center;
+    z-index: 1;
+}
+
+/* Placeholder icon */
+.placeholder-content img {
+    width: 60px;
+    height: 60px;
+    margin-top: 12px;
+    opacity: 0.7;
+}
+
+/* Status bubble (top-right) */
+#status-bubble {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(0,0,0,0.5);
+    cursor: pointer;
+    z-index: 10;
+}
+
+#status-bubble span {
+    display: none;
+    position: absolute;
+    top: 30px;
+    right: 0;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.8);
+    color: white;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+/* Bubble colors */
+.status-streaming { background-color: green; }
+.status-listening { background-color: purple; }
+.status-idle      { background-color: orange; }
+.status-offline   { background-color: gray; }

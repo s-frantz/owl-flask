@@ -1,0 +1,40 @@
+<!--
+
+ffmpeg -rtsp_transport tcp -i rtsp://localhost:8554/stream \
+       -c copy -f mp4 -movflags frag_keyframe+empty_moov \
+       /home/owl/owl_flask/static/feed.mp4
+
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live MP4 Stream</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #222;
+            color: #fff;
+        }
+        video {
+            max-width: 90%;
+            border: 2px solid #fff;
+            border-radius: 8px;
+            background-color: #000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live MP4 Stream</h1>
+    <video id="liveVideo" autoplay muted controls>
+        <source src="{{ url_for('static', filename='feed.mp4') }}" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+</body>
+</html>
