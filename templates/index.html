@@ -1,101 +1,271 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>MediaMTX Multi-Stream Viewer</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owl Control Center</title>
 <style>
-  body {
-    font-family: sans-serif;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-auto-rows: minmax(300px, 1fr);
-    gap: 10px;
-    background: #222;
-    color: #fff;
-  }
-  .frame {
-    position: relative;
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
     background: #111;
+    color: #eee;
+    font-family: sans-serif;
+    overflow: hidden;
+  }
+
+  #statusBubble {
+    position: absolute;
+    top: 10px; right: 10px;
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    cursor: pointer;
+    background: gray;
+    color: white;
+    z-index: 20;
+    transition: background 0.3s;
+  }
+
+  #main {
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    height: 100%;
+    width: 100%;
+    position: relative;
   }
-  .frame video, .frame iframe, .frame img {
+
+  #video {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
+    display: none;
+    background: black;
   }
-  .message {
+
+  #message {
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 0 5px black;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+  }
+
+  /* Decibel meter container */
+  #decibel {
+    width: 80%;
+    height: 80px;
+    display: none;
     position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(0,0,0,0.7);
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 14px;
+    top: 50%;
+    transform: translateY(-50%);
   }
+
+  #rmsValue, #thresholdValue, #lastNotification {
+    text-align: center;
+    font-family: sans-serif;
+    text-shadow: 0 0 5px black;
+  }
+
+  #rmsValue {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 3px;
+  }
+
+  #thresholdValue {
+    font-size: 14px;
+    opacity: 0.8;
+    margin-bottom: 5px;
+  }
+
+  #barContainer {
+    position: relative;
+    height: 10px;
+    background: #333;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  #bar {
+    height: 100%;
+    width: 0%;
+    background: limegreen;
+    transition: width 0.2s, background 0.2s;
+  }
+
+  #threshold {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: red;
+    opacity: 0.9;
+  }
+
+  #scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 4px;
+  }
+
+  #lastNotification {
+    margin-top: 5px;
+    font-size: 14px;
+    color: #888;
+  }
+
 </style>
+<script defer src="{{ url_for('static', filename='reader.js') }}"></script>
 </head>
 <body>
+<div id="statusBubble">Idle</div>
 
-<!-- WebRTC Frame -->
-<div class="frame">
-  <iframe id="webrtcFrame" frameborder="0"></iframe>
-  <div class="message">WebRTC</div>
+<div id="main">
+  <video id="video" autoplay muted playsinline></video>
+  <div id="message">Waiting for status...</div>
+
+  <div id="decibel">
+    <div id="rmsValue">RMS: 0.000</div>
+    <div id="thresholdValue">Notification Threshold: 0.020</div>
+    <div id="barContainer">
+      <div id="bar"></div>
+      <div id="threshold"></div>
+    </div>
+    <div id="scale">
+      <span>0</span>
+      <span>0.025</span>
+    </div>
+    <div id="lastNotification">Last Notification: None</div>
+  </div>
 </div>
 
-<!-- HLS Frame -->
-<div class="frame">
-  <video id="hlsVideo" controls autoplay muted></video>
-  <div class="message">HLS</div>
-</div>
-
-<!-- MJPEG Frame -->
-<div class="frame">
-  <img id="mjpegImg" alt="MJPEG stream" />
-  <div class="message">MJPEG</div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
 <script>
-  // Dynamically detect host/IP based on how the page is accessed
-  const HOST = window.location.hostname || 'localhost';
-  const WEBRTC_URL = `http://${HOST}:8889/stream`;
-  const HLS_URL = `http://${HOST}:8888/stream.m3u8`;
-  const MJPEG_URL = `http://${HOST}:8888/stream.mjpg`;
+const bubble = document.getElementById('statusBubble');
+const video = document.getElementById('video');
+const message = document.getElementById('message');
+const decibel = document.getElementById('decibel');
+const bar = document.getElementById('bar');
+const thresholdLine = document.getElementById('threshold');
+const rmsValue = document.getElementById('rmsValue');
+const thresholdValue = document.getElementById('thresholdValue');
+const lastNotification = document.getElementById('lastNotification');
 
-  // Assign stream URLs
-  document.getElementById('webrtcFrame').src = WEBRTC_URL;
-  document.getElementById('mjpegImg').src = MJPEG_URL;
+let currentMode = null;
+let reader = null;
+let lastNotificationTime = null;
 
-  // HLS handling
-  const video = document.getElementById('hlsVideo');
-  if (Hls.isSupported()) {
-    const hls = new Hls();
-    hls.loadSource(HLS_URL);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.ERROR, (event, data) => {
-      console.error('HLS error', data);
-      video.outerHTML = '<div class="message">HLS not available</div>';
-    });
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = HLS_URL;
-    video.addEventListener('error', () => {
-      video.outerHTML = '<div class="message">HLS not available</div>';
-    });
-  } else {
-    video.outerHTML = '<div class="message">HLS not supported</div>';
+// Poll /status every second
+async function pollStatus() {
+  try {
+    const res = await fetch('/status');
+    const data = await res.json();
+    const mode = data.status;
+    if (mode !== currentMode) updateUI(mode);
+  } catch (e) {
+    console.log('poll error:', e);
+  } finally {
+    setTimeout(pollStatus, 1000);
   }
+}
 
-  // MJPEG error handling
-  const mjpeg = document.getElementById('mjpegImg');
-  mjpeg.onerror = () => {
-    mjpeg.outerHTML = '<div class="message">MJPEG not available</div>';
-  };
+// Update UI when mode changes
+function updateUI(mode) {
+  currentMode = mode;
+  bubble.innerText = mode;
+  bubble.style.background = mode === 'Streaming Video' ? 'green' :
+                            mode === 'Listening' ? 'orange' : 'gray';
+
+  if (mode === 'Streaming Video') {
+    message.style.display = 'none';
+    decibel.style.display = 'none';
+    video.style.display = 'block';
+    startVideo();
+  } else {
+    stopVideo();
+    video.style.display = 'none';
+    if (mode === 'Listening') {
+      message.style.display = 'none';
+      decibel.style.display = 'block';
+      pollDecibel();
+    } else {
+      message.innerText = 'Idle — standing by.';
+      message.style.display = 'flex';
+      decibel.style.display = 'none';
+    }
+  }
+}
+
+// Start WebRTC video
+function startVideo() {
+  const HOST = window.location.hostname || 'localhost';
+  reader = new MediaMTXWebRTCReader({
+    url: `http://${HOST}:8889/stream/whep`,
+    onError: err => console.log('WebRTC error:', err),
+    onTrack: evt => { video.srcObject = evt.streams[0]; }
+  });
+}
+
+// Stop WebRTC video
+function stopVideo() {
+  if (reader) {
+    reader.close();
+    reader = null;
+  }
+  video.srcObject = null;
+}
+
+// Poll decibel visualization while listening
+async function pollDecibel() {
+  if (currentMode !== 'Listening') return;
+  try {
+    const res = await fetch('/audio/status');
+    const data = await res.json();
+    const rms = data.current_rms;
+    const threshold = 0.02;
+
+    // Map RMS 0–0.025 to 0–100%
+    const percent = Math.min(100, rms / 0.025 * 100);
+    bar.style.width = percent + '%';
+
+    // Bar color based on threshold
+    bar.style.background = rms >= threshold ? 'red' : 'limegreen';
+
+    // Threshold line position
+    const thresholdPercent = threshold / 0.025 * 100;
+    thresholdLine.style.left = thresholdPercent + '%';
+
+    // Update RMS and threshold text
+    rmsValue.innerText = `RMS: ${rms.toFixed(4)}`;
+    thresholdValue.innerText = `Notification Threshold: ${threshold.toFixed(3)}`;
+
+    // Update last notification
+    if (rms >= threshold) lastNotificationTime = new Date();
+    if (lastNotificationTime) {
+      const diffSec = (new Date() - lastNotificationTime) / 1000;
+      lastNotification.innerText = `Last Notification: ${lastNotificationTime.toLocaleTimeString()}`;
+      lastNotification.style.color = diffSec <= 300 ? 'red' : '#888';
+    } else {
+      lastNotification.innerText = 'Last Notification: None';
+      lastNotification.style.color = '#888';
+    }
+
+  } catch (e) {
+    console.log('decibel error:', e);
+  } finally {
+    if (currentMode === 'Listening') setTimeout(pollDecibel, 500);
+  }
+}
+
+// Initialize
+window.addEventListener('load', pollStatus);
 </script>
-
 </body>
 </html>
