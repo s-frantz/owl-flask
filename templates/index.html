@@ -27,6 +27,30 @@
     transition: background 0.3s;
   }
 
+  #powerButton {
+    position: absolute;
+    top: 10px; left: 10px;
+    display: none;
+    z-index: 20;
+  }
+
+  #powerButton button {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #444;
+    background: #222;
+    color: #eee;
+    font-size: 20px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+
+  #powerButton button:hover {
+    background: #333;
+    transform: scale(1.1);
+  }
+
   #main {
     display: flex;
     align-items: center;
@@ -34,6 +58,7 @@
     height: 100%;
     width: 100%;
     position: relative;
+    flex-direction: column;
   }
 
   #video {
@@ -56,7 +81,6 @@
     width: 100%;
   }
 
-  /* Decibel meter container */
   #decibel {
     width: 80%;
     height: 80px;
@@ -68,7 +92,6 @@
 
   #rmsValue, #thresholdValue, #lastNotification {
     text-align: center;
-    font-family: sans-serif;
     text-shadow: 0 0 5px black;
   }
 
@@ -122,11 +145,37 @@
     color: #888;
   }
 
+  #controls {
+    position: absolute;
+    bottom: 20px;
+    display: flex;
+    gap: 10px;
+  }
+
+  button.control {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.2s;
+  }
+
+  button.control:hover {
+    background: #333;
+  }
 </style>
 <script defer src="{{ url_for('static', filename='reader.js') }}"></script>
 </head>
 <body>
 <div id="statusBubble">Idle</div>
+
+<!-- NEW: Power button -->
+<div id="powerButton">
+  <button onclick="shutdownPi()" title="Shut down Raspberry Pi">⏻</button>
+</div>
 
 <div id="main">
   <video id="video" autoplay muted playsinline></video>
@@ -145,6 +194,8 @@
     </div>
     <div id="lastNotification">Last Notification: None</div>
   </div>
+
+  <div id="controls"></div>
 </div>
 
 <script>
@@ -157,6 +208,8 @@ const thresholdLine = document.getElementById('threshold');
 const rmsValue = document.getElementById('rmsValue');
 const thresholdValue = document.getElementById('thresholdValue');
 const lastNotification = document.getElementById('lastNotification');
+const controls = document.getElementById('controls');
+const powerButton = document.getElementById('powerButton');
 
 let currentMode = null;
 let reader = null;
@@ -183,6 +236,8 @@ function updateUI(mode) {
   bubble.style.background = mode === 'Streaming Video' ? 'green' :
                             mode === 'Listening' ? 'orange' : 'gray';
 
+  updateButtons(mode);
+
   if (mode === 'Streaming Video') {
     message.style.display = 'none';
     decibel.style.display = 'none';
@@ -203,7 +258,50 @@ function updateUI(mode) {
   }
 }
 
-// Start WebRTC video
+// Update buttons depending on mode
+function updateButtons(mode) {
+  controls.innerHTML = '';
+  powerButton.style.display = 'none';
+
+  if (mode === 'Idle') {
+    powerButton.style.display = 'block';
+    controls.innerHTML = `
+      <button class="control" onclick="switchTo('audio')">🎤 Start Listening</button>
+      <button class="control" onclick="switchTo('video')">📹 Start Streaming</button>
+    `;
+  } else if (mode === 'Listening') {
+    controls.innerHTML = `
+      <button class="control" onclick="switchTo('video')">📹 Switch to Video</button>
+      <button class="control" onclick="switchTo('idle')">⏹ Stop (Idle)</button>
+    `;
+  } else if (mode === 'Streaming Video') {
+    controls.innerHTML = `
+      <button class="control" onclick="switchTo('audio')">🎤 Switch to Audio</button>
+      <button class="control" onclick="switchTo('idle')">⏹ Stop (Idle)</button>
+    `;
+  }
+}
+
+// Switch modes
+async function switchTo(target) {
+  try {
+    if (target === 'audio') {
+      await fetch('/video/stop');
+      await fetch('/audio/start');
+    } else if (target === 'video') {
+      await fetch('/audio/stop');
+      await fetch('/video/start');
+    } else if (target === 'idle') {
+      await fetch('/audio/stop');
+      await fetch('/video/stop');
+    }
+    setTimeout(pollStatus, 500);
+  } catch (e) {
+    console.log('switch error:', e);
+  }
+}
+
+// Start/stop WebRTC video
 function startVideo() {
   const HOST = window.location.hostname || 'localhost';
   reader = new MediaMTXWebRTCReader({
@@ -213,7 +311,6 @@ function startVideo() {
   });
 }
 
-// Stop WebRTC video
 function stopVideo() {
   if (reader) {
     reader.close();
@@ -222,7 +319,7 @@ function stopVideo() {
   video.srcObject = null;
 }
 
-// Poll decibel visualization while listening
+// Poll decibel visualization
 async function pollDecibel() {
   if (currentMode !== 'Listening') return;
   try {
@@ -231,22 +328,16 @@ async function pollDecibel() {
     const rms = data.current_rms;
     const threshold = 0.02;
 
-    // Map RMS 0–0.025 to 0–100%
     const percent = Math.min(100, rms / 0.025 * 100);
     bar.style.width = percent + '%';
-
-    // Bar color based on threshold
     bar.style.background = rms >= threshold ? 'red' : 'limegreen';
 
-    // Threshold line position
     const thresholdPercent = threshold / 0.025 * 100;
     thresholdLine.style.left = thresholdPercent + '%';
 
-    // Update RMS and threshold text
     rmsValue.innerText = `RMS: ${rms.toFixed(4)}`;
     thresholdValue.innerText = `Notification Threshold: ${threshold.toFixed(3)}`;
 
-    // Update last notification
     if (rms >= threshold) lastNotificationTime = new Date();
     if (lastNotificationTime) {
       const diffSec = (new Date() - lastNotificationTime) / 1000;
@@ -264,7 +355,20 @@ async function pollDecibel() {
   }
 }
 
-// Initialize
+// Shutdown Pi
+async function shutdownPi() {
+  if (!confirm("Are you sure you want to shut down the Raspberry Pi?")) return;
+
+  try {
+    const res = await fetch('/shutdown', { method: 'POST' });
+    const data = await res.json();
+    alert(data.status || "Shutting down...");
+  } catch (e) {
+    console.log("Shutdown error:", e);
+    alert("Failed to send shutdown command.");
+  }
+}
+
 window.addEventListener('load', pollStatus);
 </script>
 </body>

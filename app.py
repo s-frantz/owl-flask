@@ -69,7 +69,7 @@ def start_video():
                 [MEDIAMTX_PATH],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd=os.path.dirname(MEDIAMTX_PATH),  # run from mediamtx root
+                cwd=os.path.dirname(MEDIAMTX_PATH),
                 start_new_session=True
             )
 
@@ -92,18 +92,14 @@ def start_video():
         except OSError as e:
             return f"Failed to start video processes: {e}"
 
-        # Add to processes dict
         _video_processes["mediamtx"] = mediamtx_proc
         _video_processes["ffmpeg"] = ffmpeg_proc
 
-        # --- Warmup check ---
         time.sleep(FFMPEG_WARMUP_SEC)
         if ffmpeg_proc.poll() is not None:
-            # ffmpeg exited early → likely bad audio device
             _video_processes.clear()
             return f"Failed to start ffmpeg (audio device {selected_audio})"
 
-        # Thread to monitor processes (optional, mainly for cleanup/status)
         def monitor_video():
             try:
                 while any(proc.poll() is None for proc in _video_processes.values()):
@@ -123,7 +119,6 @@ def stop_video():
         if not _video_processes:
             return "Video not running."
 
-        # iterate over a copy to avoid RuntimeError
         for name, proc in list(_video_processes.items()):
             proc.terminate()
         for name, proc in list(_video_processes.items()):
@@ -178,5 +173,15 @@ def route_video_stop():
 def route_video_status():
     return jsonify(video_status())
 
+# --- Shutdown route ---
+@app.route("/shutdown", methods=["POST"])
+def shutdown():
+    try:
+        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+        return jsonify({"status": "Shutting down Raspberry Pi..."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Main ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
