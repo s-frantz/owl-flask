@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, send_file, request
 import subprocess
 import threading
 import audio_server
@@ -17,6 +17,9 @@ AUDIO_DEVICE_OPTIONS = ["hw:0,0", "hw:1,0"]
 MEDIAMTX_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mediamtx"))
 FFMPEG_WARMUP_SEC = 2  # seconds to wait for ffmpeg to initialize
 
+# --- Recordings folder relative to this file ---
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "recordings")
+
 def is_process_running(process_name):
     try:
         subprocess.check_output(['pgrep', '-f', process_name])
@@ -29,13 +32,11 @@ def get_pi_status():
     listening_on = audio_server._monitor_thread is not None and audio_server._monitor_thread.is_alive()
 
     if streaming_on:
-        state = "Streaming Video"
+        return "Streaming Video"
     elif listening_on:
-        state = "Listening"
+        return "Listening"
     else:
-        state = "Idle"
-
-    return state
+        return "Idle"
 
 # --- Video control functions ---
 def start_video():
@@ -45,7 +46,6 @@ def start_video():
         if _video_thread is not None and _video_thread.is_alive():
             return "Video already running."
 
-        # --- Try possible audio devices ---
         selected_audio = None
         for dev in AUDIO_DEVICE_OPTIONS:
             try:
@@ -64,7 +64,6 @@ def start_video():
             return "No working audio device found (tried 0,0 and 1,0)."
 
         try:
-            # Start mediamtx independently in its root folder
             mediamtx_proc = subprocess.Popen(
                 [MEDIAMTX_PATH],
                 stdout=subprocess.DEVNULL,
@@ -73,7 +72,6 @@ def start_video():
                 start_new_session=True
             )
 
-            # Start ffmpeg independently
             ffmpeg_cmd = [
                 "ffmpeg", "-loglevel", "quiet",
                 "-f", "v4l2", "-framerate", "30", "-video_size", "480x360", "-i", VIDEO_DEVICE,
@@ -118,7 +116,6 @@ def stop_video():
     with _video_lock:
         if not _video_processes:
             return "Video not running."
-
         for name, proc in list(_video_processes.items()):
             proc.terminate()
         for name, proc in list(_video_processes.items()):
@@ -173,7 +170,6 @@ def route_video_stop():
 def route_video_status():
     return jsonify(video_status())
 
-# --- Shutdown route ---
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
     try:
@@ -182,6 +178,66 @@ def shutdown():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- Latest audio route with dismissal ---
+@app.route("/audio/latest", methods=["GET"])
+def latest_audio():
+    try:
+        files = [
+            f for f in os.listdir(OUTPUT_DIR)
+            if f.endswith(".wav") and os.path.isfile(os.path.join(OUTPUT_DIR, f))
+        ]
+        if not files:
+            return "", 404
+
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(OUTPUT_DIR, x)), reverse=True)
+        latest_file = files[0]
+        resp = send_file(os.path.join(OUTPUT_DIR, latest_file), as_attachment=False, mimetype='audio/wav')
+        resp.headers["X-Filename"] = latest_file
+        return resp
+    except Exception as e:
+        print("Error fetching latest audio:", e)
+        return "", 500
+
+# --- Check if dismissed ---
+@app.route("/audio/is_dismissed", methods=["GET"])
+def is_dismissed():
+    filename = request.args.get("filename")
+    if not filename:
+        return jsonify({"error": "Missing filename"}), 400
+    dismissed_marker = os.path.join(OUTPUT_DIR, f"{filename}.dismissed")
+    return jsonify({"dismissed": os.path.exists(dismissed_marker)})
+
+# --- Mark as dismissed ---
+@app.route("/audio/dismiss", methods=["POST"])
+def mark_dismissed():
+    data = request.get_json()
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "Missing filename"}), 400
+    dismissed_marker = os.path.join(OUTPUT_DIR, f"{filename}.dismissed")
+    try:
+        with open(dismissed_marker, "w") as f:
+            f.write("dismissed")
+        return jsonify({"status": f"{filename} marked dismissed"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Remove dismissed (uncollapse) ---
+@app.route("/audio/dismiss", methods=["DELETE"])
+def remove_dismissed():
+    data = request.get_json()
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "Missing filename"}), 400
+    dismissed_marker = os.path.join(OUTPUT_DIR, f"{filename}.dismissed")
+    try:
+        if os.path.exists(dismissed_marker):
+            os.remove(dismissed_marker)
+        return jsonify({"status": f"{filename} un-dismissed"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- Main ---
 if __name__ == "__main__":
+    os.makedirs(OUTPUT_DIR, exist_ok=True)  # ensure recordings folder exists
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -7,6 +7,7 @@ import math
 import threading
 import requests
 import subprocess
+import wave
 from collections import deque
 from flask import Flask, jsonify
 from dotenv import load_dotenv
@@ -24,6 +25,9 @@ STEP_SEC = 1
 SAMPLE_RATE = 44100
 CHANNELS = 2
 DEVICE = "plughw:1,0"
+RECORD_AFTER_SEC = 18  # post-event recording duration
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "recordings")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "rms_state.json")
@@ -34,13 +38,13 @@ last_notification_time = 0
 lock = threading.Lock()
 _monitor_thread = None
 _stop_event = threading.Event()
+_recording_lock = threading.Lock()
 
 # --- Flask app ---
 app = Flask(__name__)
 
 # --- Audio / RMS functions ---
 def write_state(rms_value, timestamp):
-    """Atomically write RMS state to JSON file"""
     data = {"rms": round(rms_value, 5), "timestamp": timestamp}
     tmp_file = STATE_FILE + ".tmp"
     with open(tmp_file, "w") as f:
@@ -75,8 +79,51 @@ def send_notification(rms_value):
         last_notification_time = time.time()
     print("Notification sent:", text)
 
+def save_wav(filename, samples):
+    """Write a WAV file from raw PCM samples"""
+    with wave.open(filename, 'w') as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(struct.pack("<{}h".format(len(samples)), *samples))
+
+def record_event(pre_buffer, duration_sec):
+    """Save pre-buffer + record post-event audio (delete old recordings first)"""
+    with _recording_lock:
+        # --- Delete old recordings ---
+        for f in os.listdir(OUTPUT_DIR):
+            if f.endswith(".wav") or f.endswith(".dismissed"):
+                try:
+                    os.remove(os.path.join(OUTPUT_DIR, f))
+                except OSError:
+                    pass  # ignore deletion errors
+
+        filename = os.path.join(
+            OUTPUT_DIR, f"event_{time.strftime('%Y%m%d_%H%M%S')}.wav"
+        )
+        print(f"Recording event audio to {filename}...")
+        samples = list(pre_buffer)
+
+        # Record post-event audio
+        cmd = [
+            "arecord",
+            "-D", DEVICE,
+            "-f", "cd",
+            "-t", "raw",
+            "-d", str(duration_sec),
+            "-q"
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        raw_post = proc.stdout.read()
+        proc.wait()
+        if raw_post:
+            post_samples = struct.unpack("<{}h".format(len(raw_post)//2), raw_post)
+            samples.extend(post_samples)
+
+        save_wav(filename, samples)
+        print(f"Event recording saved: {filename}")
+
 def monitor_loop():
-    """Background monitor: reads audio, calculates RMS, writes state, sends notifications"""
     print("Audio monitor thread started.")
     while not _stop_event.is_set():
         # --- Capture audio chunk ---
@@ -108,12 +155,14 @@ def monitor_loop():
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         write_state(rms_value, timestamp)
 
-        # --- Notification check ---
+        # --- Notification & recording check ---
         with lock:
             last_time = last_notification_time
         now = time.time()
         if rms_value > THRESHOLD and now - last_time > COOLDOWN_SEC:
             send_notification(rms_value)
+            # Record event: pre-buffer + post-event
+            record_event(buffer, RECORD_AFTER_SEC)
 
         time.sleep(0.1)  # slight pause to prevent tight loop if arecord fails
 
@@ -137,7 +186,6 @@ def start_monitor():
         except subprocess.CalledProcessError:
             continue
     else:
-        # --- No working device found ---
         return "No working audio device found (tried 0,0 and 1,0)."
 
     # --- Start monitor thread ---
@@ -150,7 +198,7 @@ def stop_monitor():
     global _monitor_thread
     _stop_event.set()
     if _monitor_thread is not None:
-        _monitor_thread.join(timeout=5)  # wait up to 5 seconds
+        _monitor_thread.join(timeout=5)
         if _monitor_thread.is_alive():
             return "Monitor did not stop in time."
     return "Audio monitor successfully stopped."
@@ -177,8 +225,8 @@ def route_start():
     return jsonify({"status": msg})
 
 @app.route("/audio/stop", methods=["GET"])
-def audio_stop():
-    msg = audio_server.stop_monitor()
+def route_stop():
+    msg = stop_monitor()
     return jsonify({"status": msg})
 
 @app.route("/audio/status", methods=["GET"])

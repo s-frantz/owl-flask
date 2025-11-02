@@ -283,23 +283,143 @@ function updateButtons(mode) {
 }
 
 // Switch modes
+let audioPopup = null;  // <-- track the current audio popup globally
+
 async function switchTo(target) {
   try {
+    // Remove existing popup if switching away
+    if (audioPopup) {
+      if (audioPopup.audioUrl) URL.revokeObjectURL(audioPopup.audioUrl);
+      audioPopup.remove();
+      audioPopup = null;
+    }
+
     if (target === 'audio') {
       await fetch('/video/stop');
       await fetch('/audio/start');
     } else if (target === 'video') {
       await fetch('/audio/stop');
+
+      try {
+        const audioRes = await fetch('/audio/latest');
+        if (audioRes.ok) {
+          const blob = await audioRes.blob();
+          const url = URL.createObjectURL(blob);
+          let filename = audioRes.headers.get('X-Filename') || 'event_latest.wav';
+          let baseName = filename.replace('.wav', '');
+
+          const match = baseName.match(/event_(\d{8})_(\d{6})/);
+          let titleText = '';
+          if (match) {
+            const datePart = match[1];
+            const timePart = match[2];
+            titleText = `${datePart.slice(0,4)}-${datePart.slice(4,6)}-${datePart.slice(6,8)} ${timePart.slice(0,2)}:${timePart.slice(2,4)}:${timePart.slice(4,6)}`;
+          }
+
+          const dismissedRes = await fetch(`/audio/is_dismissed?filename=${baseName}`);
+          const dismissed = dismissedRes.ok ? (await dismissedRes.json()).dismissed : false;
+
+          const popup = document.createElement('div');
+          popup.style.position = 'fixed';
+          popup.style.top = '20px';
+          popup.style.left = '20px';
+          popup.style.background = '#222';
+          popup.style.border = '1px solid #444';
+          popup.style.borderRadius = '8px';
+          popup.style.color = '#eee';
+          popup.style.zIndex = 50;
+          popup.style.transition = 'all 0.3s ease';
+          popup.style.display = 'flex';
+          popup.style.flexDirection = 'column';
+          popup.style.overflow = 'hidden';
+          popup.audioUrl = url; // track URL for cleanup
+
+          document.body.appendChild(popup);
+          audioPopup = popup;  // track globally
+
+          async function collapse() {
+            popup.innerHTML = '';
+            popup.style.width = '30px';
+            popup.style.height = '30px';
+            popup.style.padding = '5px';
+            popup.title = titleText;
+
+            const expandBtn = document.createElement('button');
+            expandBtn.innerText = '▶';
+            expandBtn.style.width = '100%';
+            expandBtn.style.height = '100%';
+            expandBtn.style.background = 'transparent';
+            expandBtn.style.border = 'none';
+            expandBtn.style.color = '#eee';
+            expandBtn.style.cursor = 'pointer';
+            expandBtn.onclick = expand;
+            popup.appendChild(expandBtn);
+
+            try {
+              await fetch('/audio/dismiss', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ filename: baseName })
+              });
+            } catch(e) { console.log('Failed to mark dismissed:', e); }
+          }
+
+          async function expand() {
+            popup.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                <span>${titleText}</span>
+                <div style="display:flex; gap:5px;">
+                  <button id="collapseBtn" style="background:#444;color:#eee;border:none;border-radius:4px;cursor:pointer;">◀</button>
+                  <button id="closePopup" style="background:#444;color:#eee;border:none;border-radius:4px;cursor:pointer;">✖</button>
+                </div>
+              </div>
+              <audio controls autoplay style="width:100%;">
+                <source src="${url}" type="audio/wav">
+                Your browser does not support the audio element.
+              </audio>
+            `;
+            popup.style.width = '250px';
+            popup.style.height = 'auto';
+            popup.style.padding = '10px';
+
+            popup.querySelector('#collapseBtn').onclick = collapse;
+            popup.querySelector('#closePopup').onclick = () => {
+              URL.revokeObjectURL(url);
+              popup.remove();
+              audioPopup = null;
+            };
+
+            try {
+              await fetch('/audio/dismiss', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ filename: baseName })
+              });
+            } catch(e) { console.log('Failed to remove dismissed:', e); }
+          }
+
+          if (dismissed) {
+            await collapse();
+          } else {
+            await expand();
+          }
+        }
+      } catch(e) {
+        console.log('Failed to fetch/play latest audio:', e);
+      }
+
       await fetch('/video/start');
     } else if (target === 'idle') {
       await fetch('/audio/stop');
       await fetch('/video/stop');
     }
+
     setTimeout(pollStatus, 500);
   } catch (e) {
     console.log('switch error:', e);
   }
 }
+
 
 // Start/stop WebRTC video
 function startVideo() {
