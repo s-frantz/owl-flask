@@ -46,6 +46,7 @@ def start_video():
         if _video_thread is not None and _video_thread.is_alive():
             return "Video already running."
 
+        # --- Try possible audio devices ---
         selected_audio = None
         for dev in AUDIO_DEVICE_OPTIONS:
             try:
@@ -64,6 +65,7 @@ def start_video():
             return "No working audio device found (tried 0,0 and 1,0)."
 
         try:
+            # Start mediamtx independently in its root folder
             mediamtx_proc = subprocess.Popen(
                 [MEDIAMTX_PATH],
                 stdout=subprocess.DEVNULL,
@@ -72,6 +74,7 @@ def start_video():
                 start_new_session=True
             )
 
+            # Start ffmpeg independently
             ffmpeg_cmd = [
                 "ffmpeg", "-loglevel", "quiet",
                 "-f", "v4l2", "-framerate", "30", "-video_size", "480x360", "-i", VIDEO_DEVICE,
@@ -170,6 +173,7 @@ def route_video_stop():
 def route_video_status():
     return jsonify(video_status())
 
+# --- Shutdown route ---
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
     try:
