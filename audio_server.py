@@ -200,7 +200,7 @@ def stop_monitor():
     global _monitor_thread
     _stop_event.set()
     if _monitor_thread is not None:
-        _monitor_thread.join(timeout=5)   # wait up to 5 seconds
+        _monitor_thread.join(timeout=5)  # wait up to 5 seconds
         if _monitor_thread.is_alive():
             return "Monitor did not stop in time."
     return "Audio monitor successfully stopped."
