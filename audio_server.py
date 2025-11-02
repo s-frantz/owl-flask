@@ -45,6 +45,7 @@ app = Flask(__name__)
 
 # --- Audio / RMS functions ---
 def write_state(rms_value, timestamp):
+    """Atomically write RMS state to JSON file"""
     data = {"rms": round(rms_value, 5), "timestamp": timestamp}
     tmp_file = STATE_FILE + ".tmp"
     with open(tmp_file, "w") as f:
@@ -124,6 +125,7 @@ def record_event(pre_buffer, duration_sec):
         print(f"Event recording saved: {filename}")
 
 def monitor_loop():
+    """Background monitor: reads audio, calculates RMS, writes state, sends notifications"""
     print("Audio monitor thread started.")
     while not _stop_event.is_set():
         # --- Capture audio chunk ---
@@ -198,7 +200,7 @@ def stop_monitor():
     global _monitor_thread
     _stop_event.set()
     if _monitor_thread is not None:
-        _monitor_thread.join(timeout=5)
+        _monitor_thread.join(timeout=5)   # wait up to 5 seconds
         if _monitor_thread.is_alive():
             return "Monitor did not stop in time."
     return "Audio monitor successfully stopped."

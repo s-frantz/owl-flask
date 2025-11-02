@@ -36,7 +36,7 @@ def get_pi_status():
     elif listening_on:
         return "Listening"
     else:
-        return "Idle"
+    return "Idle"
 
 # --- Video control functions ---
 def start_video():

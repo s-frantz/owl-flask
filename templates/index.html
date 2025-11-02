@@ -370,7 +370,6 @@ async function switchTo(target) {
                 <span>${titleText}</span>
                 <div style="display:flex; gap:5px;">
                   <button id="collapseBtn" style="background:#444;color:#eee;border:none;border-radius:4px;cursor:pointer;">◀</button>
-                  <button id="closePopup" style="background:#444;color:#eee;border:none;border-radius:4px;cursor:pointer;">✖</button>
                 </div>
               </div>
               <audio controls autoplay style="width:100%;">
@@ -383,11 +382,6 @@ async function switchTo(target) {
             popup.style.padding = '10px';
 
             popup.querySelector('#collapseBtn').onclick = collapse;
-            popup.querySelector('#closePopup').onclick = () => {
-              URL.revokeObjectURL(url);
-              popup.remove();
-              audioPopup = null;
-            };
 
             try {
               await fetch('/audio/dismiss', {
