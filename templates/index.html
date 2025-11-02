@@ -16,7 +16,8 @@
 
   #statusBubble {
     position: absolute;
-    top: 10px; right: 10px;
+    top: 20px;
+    right: 20px;
     padding: 6px 12px;
     border-radius: 12px;
     font-size: 13px;
@@ -26,10 +27,14 @@
     z-index: 20;
     transition: background 0.3s;
   }
+  #statusBubble.expanded {
+    /* optional: maybe slightly larger when expanded, like a shadow */
+    box-shadow: 0 0 8px rgba(255,255,255,0.3);
+  }
 
   #powerButton {
     position: absolute;
-    top: 10px; left: 10px;
+    top: 20px; left: 20px;
     display: none;
     z-index: 20;
   }
@@ -147,7 +152,7 @@
 
   #controls {
     position: absolute;
-    bottom: 20px;
+    bottom: 30px;
     display: flex;
     gap: 10px;
   }
@@ -178,9 +183,8 @@
 </div>
 
 <div id="main">
-  <video id="video" autoplay muted playsinline></video>
+  <video id="video" autoplay playsinline controls></video>
   <div id="message">Waiting for status...</div>
-
   <div id="decibel">
     <div id="rmsValue">RMS: 0.000</div>
     <div id="thresholdValue">Notification Threshold: 0.020</div>
@@ -214,6 +218,32 @@ const powerButton = document.getElementById('powerButton');
 let currentMode = null;
 let reader = null;
 let lastNotificationTime = null;
+let bubbleLocked = false;
+
+// --- INITIALIZE COLLAPSED BUBBLE ---
+function updateBubbleContent() {
+  bubble.textContent = (bubbleLocked || bubble.classList.contains('expanded')) ? currentMode : '\u00A0';
+}
+updateBubbleContent();
+bubble.classList.remove('expanded');
+
+// Expand / collapse on hover
+bubble.addEventListener('mouseenter', () => {
+  bubble.classList.add('expanded');
+  updateBubbleContent();
+});
+
+bubble.addEventListener('mouseleave', () => {
+  bubble.classList.remove('expanded');
+  updateBubbleContent();
+});
+
+// Click to lock/unlock
+bubble.addEventListener('click', () => {
+  bubbleLocked = !bubbleLocked;
+  bubble.classList.toggle('expanded', bubbleLocked);
+  updateBubbleContent();
+});
 
 // Poll /status every second
 async function pollStatus() {
@@ -232,8 +262,15 @@ async function pollStatus() {
 // Update UI when mode changes
 function updateUI(mode) {
   currentMode = mode;
-  bubble.innerText = mode;
-  bubble.style.background = mode === 'Streaming Video' ? 'green' :
+
+  // Only show mode text if bubble is expanded or locked
+  if (bubbleLocked || bubble.classList.contains('expanded')) {
+    bubble.textContent = mode;
+  } else {
+    bubble.textContent = '\u00A0';
+  }
+
+  bubble.style.background = mode === 'Streaming Video' ? 'seagreen' :
                             mode === 'Listening' ? 'orange' : 'gray';
 
   updateButtons(mode);
